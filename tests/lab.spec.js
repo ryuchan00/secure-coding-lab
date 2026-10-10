@@ -8,7 +8,8 @@ async function save(request, lab, file = 'index.php') {
   expect(res.status()).toBe(200);
 }
 test.afterEach(async ({ request }) => {
-  for (const id of ['sqli', 'xss', 'csrf']) await save(request, id);
+  for (const id of ['sqli', 'xss', 'csrf', 'access', 'stored-xss', 'traversal']) await save(request, id);
+  await request.post('/api/progress', { headers: { Origin: origin }, data: { completed: [] } });
 });
 test('SQLi uses a real database; parameter binding preserves login and rejects injection', async ({ page, request }) => {
   await save(request, 'sqli');
@@ -59,6 +60,7 @@ test('CSRF cross-origin form carries session cookie; token validation blocks it'
 });
 test('editor saves and executes PHP; reset and solution work; preview cannot access editor', async ({ page, request }) => {
   await save(request, 'sqli');
+  await request.post('/api/progress', { headers: { Origin: origin }, data: { completed: [] } });
   await page.goto('/');
   await expect(page.locator('#title')).toHaveText('SQLインジェクション');
   await expect(page.locator('.CodeMirror')).toBeVisible();
@@ -78,13 +80,13 @@ test('editor saves and executes PHP; reset and solution work; preview cannot acc
   await page.getByRole('button', { name: /保存して Run/ }).click();
   page.once('dialog', d => d.accept());
   await page.getByRole('button', { name: '初期コードに戻す' }).click();
-  expect(await page.evaluate(() => window.labEditor.getValue())).toContain('$db->prepare');
+  await expect.poll(() => page.evaluate(() => window.labEditor.getValue())).toBe(fs.readFileSync(path.join(__dirname, '..', 'lessons/sqli/index.php'), 'utf8'));
   await expect(page.locator('#dirty')).toHaveText('保存済み');
   const frame = page.frames().find(f => f.url().startsWith('http://localhost:8081'));
   expect(await frame.evaluate(() => { try { return parent.document.title; } catch { return 'blocked'; } })).toBe('blocked');
   await page.getByRole('button', { name: '学習済みにする' }).click();
   await page.reload();
-  await expect(page.locator('#progress')).toHaveText('1 / 3');
+  await expect(page.locator('#progress')).toHaveText('1 / 6');
   await page.screenshot({ path: 'test-results/workspace.png', fullPage: true });
 });
 test('editor rejects cross-origin mutation, path traversal and oversized requests', async ({ request }) => {
@@ -104,4 +106,62 @@ test('mobile layout remains usable', async ({ page }) => {
   await page.goto('/');
   await expect(page.locator('#title')).toHaveText('SQLインジェクション');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('access control preserves own document and refuses another owner', async ({ page, request }) => {
+  await save(request, 'access');
+  await page.goto('http://localhost:8085/?id=1');
+  await expect(page.locator('#document')).toContainText('aliceの明細');
+  await page.goto('http://localhost:8085/?id=2');
+  await expect(page.locator('#document')).toContainText('bobの明細');
+  await save(request, 'access', 'solution.php');
+  expect((await page.goto('http://localhost:8085/?id=2')).status()).toBe(403);
+  await expect(page.locator('body')).toContainText('閲覧する権限がありません');
+  await page.goto('http://localhost:8085/?id=1');
+  await expect(page.locator('#document')).toContainText('aliceの明細');
+  expect((await page.goto('http://localhost:8085/?id=999')).status()).toBe(404);
+});
+test('stored XSS executes again on reload; escaping covers saved and new comments', async ({ page, request }) => {
+  const payload = '<img src=x onerror="document.getElementById(\'notice\').textContent=\'保存されたXSSが実行されました\'">';
+  await save(request, 'stored-xss');
+  await page.goto('http://localhost:8086/');
+  await page.locator('[name=message]').fill(payload);
+  await page.getByRole('button', { name: '投稿' }).click();
+  await expect(page.locator('#notice')).toHaveText('保存されたXSSが実行されました');
+  await page.reload();
+  await expect(page.locator('#notice')).toHaveText('保存されたXSSが実行されました');
+  await save(request, 'stored-xss', 'solution.php');
+  await page.reload();
+  await expect(page.locator('#notice')).toHaveText('コメントは文字として表示されます');
+  await expect(page.locator('#comments .result').first()).toHaveText(payload);
+  await expect(page.locator('#comments img')).toHaveCount(0);
+  await page.locator('[name=message]').fill('こんにちは & ありがとう');
+  await page.getByRole('button', { name: '投稿' }).click();
+  await expect(page.locator('#comments .result').first()).toHaveText('こんにちは & ありがとう');
+});
+test('traversal reads fixture outside public directory; allowlist blocks it', async ({ page, request }) => {
+  await save(request, 'traversal');
+  await page.goto('http://localhost:8087/?file=guide.txt');
+  await expect(page.locator('#content')).toContainText('公開ガイド');
+  await page.goto('http://localhost:8087/?file=../private.txt');
+  await expect(page.locator('#content')).toContainText('TEST-CUSTOMER-001');
+  await save(request, 'traversal', 'solution.php');
+  expect((await page.goto('http://localhost:8087/?file=../private.txt')).status()).toBe(403);
+  await expect(page.locator('body')).toContainText('公開していません');
+  await page.goto('http://localhost:8087/?file=guide.txt');
+  await expect(page.locator('#content')).toContainText('公開ガイド');
+});
+test('beginners see explanations before exercises for all six lessons', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('nav button')).toHaveCount(6);
+  const concepts = { sqli: 'SQLとデータベース', xss: 'XSSとは', csrf: 'Cookieとログイン状態', access: '認証と認可', 'stored-xss': '保存型XSSとは', traversal: 'ディレクトリとファイルの場所' };
+  for (const [id, heading] of Object.entries(concepts)) {
+    await page.locator(`nav button[data-id="${id}"]`).click();
+    await expect(page.locator('#explanation')).toBeVisible();
+    await expect(page.locator('#explanation')).toContainText(heading);
+    await expect(page.locator('#practice')).toBeHidden();
+    await page.getByRole('button', { name: '体験と修正の手順' }).click();
+    await expect(page.locator('#practice')).toBeVisible();
+    await expect(page.locator('#steps h3')).toHaveCount(3);
+  }
 });

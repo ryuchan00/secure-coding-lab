@@ -16,6 +16,9 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: docker compose up --build -d --wait
       - run: npm test
+      - run: python3 scripts/classroom.py --seats 2 --editor-port 9080 --runtime-port 9081 --attacker-port 9084 --output .classroom-test
+      - run: docker compose -f .classroom-test/compose.json up --build -d --wait
+      - run: CLASSROOM_CONFIG=.classroom-test npx playwright test tests/classroom.spec.js
       - if: failure()
         run: docker compose logs
       - if: always()
@@ -25,3 +28,5 @@ jobs:
           path: test-results/
       - if: always()
         run: docker compose down -v
+      - if: always()
+        run: docker compose -f .classroom-test/compose.json down -v

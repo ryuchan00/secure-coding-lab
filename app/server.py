@@ -1,4 +1,5 @@
-"""Local single-learner editor. PHP executes only in separate containers."""
+"""One editor per learner; execution takes place in a separate container."""
+import html
 import json
 import mimetypes
 import os
@@ -13,6 +14,13 @@ STATE = Path(os.getenv('STATE_DIR', '/state'))
 CATALOG = json.loads((LESSONS / 'catalog.json').read_text())
 IDS = {lesson['id'] for lesson in CATALOG}
 LOCK = threading.Lock()
+EDITOR_ORIGIN = os.getenv('EDITOR_ORIGIN', 'http://localhost:8080')
+RUNTIME_ORIGIN = os.getenv('RUNTIME_ORIGIN', '')
+ATTACKER_ORIGIN = os.getenv('ATTACKER_ORIGIN', 'http://localhost:8084')
+EDITOR_HOST = urlsplit(EDITOR_ORIGIN).netloc
+ATTACKER_HOST = urlsplit(ATTACKER_ORIGIN).netloc
+FRAME_ORIGINS = [RUNTIME_ORIGIN] if RUNTIME_ORIGIN else [f'http://localhost:{x["port"]}' for x in CATALOG]
+FRAME_ORIGINS.append(ATTACKER_ORIGIN)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -25,19 +33,26 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
-        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-src http://localhost:8081 http://localhost:8082 http://localhost:8083 http://localhost:8084; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-src " + ' '.join(FRAME_ORIGINS) + "; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
         self.end_headers()
         self.wfile.write(body)
 
     def valid_host(self):
-        return self.headers.get('Host') in {'localhost:8080', '127.0.0.1:8080'}
+        return self.headers.get('Host') == EDITOR_HOST
 
     def do_GET(self):
         if not self.valid_host():
-            return self.reply(403, {'error': 'localhost:8080 から開いてください'})
+            return self.reply(403, {'error': '研修の入口URLから開いてください'})
         path = urlsplit(self.path).path
         if path == '/api/lessons':
             return self.reply(200, CATALOG)
+        if path == '/api/workspace':
+            return self.reply(200, {'name': os.getenv('WORKSPACE_NAME', '個人の学習環境'), 'classroom': bool(RUNTIME_ORIGIN), 'runtimeOrigin': RUNTIME_ORIGIN, 'attackerOrigin': ATTACKER_ORIGIN})
+        if path == '/api/progress':
+            with LOCK:
+                target = STATE / 'meta' / 'progress.json'
+                result = json.loads(target.read_text()) if target.exists() else {'completed': []}
+            return self.reply(200, result)
         parts = path.strip('/').split('/')
         if len(parts) == 3 and parts[0] == 'api' and parts[1] in IDS:
             lab, action = parts[1:]
@@ -59,12 +74,14 @@ class Handler(BaseHTTPRequestHandler):
         self.reply(404, {'error': '見つかりません'})
 
     def do_POST(self):
-        if not self.valid_host() or self.headers.get('Origin') not in {'http://localhost:8080', 'http://127.0.0.1:8080'}:
+        if not self.valid_host() or self.headers.get('Origin') != EDITOR_ORIGIN:
             return self.reply(403, {'error': '編集画面から操作してください'})
         if self.headers.get('Content-Type') != 'application/json':
             return self.reply(415, {'error': 'JSONが必要です'})
-        parts = urlsplit(self.path).path.strip('/').split('/')
-        if len(parts) != 3 or parts[0] != 'api' or parts[1] not in IDS or parts[2] not in {'code', 'reset'}:
+        path = urlsplit(self.path).path
+        parts = path.strip('/').split('/')
+        progress = path == '/api/progress'
+        if not progress and (len(parts) != 3 or parts[0] != 'api' or parts[1] not in IDS or parts[2] not in {'code', 'reset'}):
             return self.reply(404, {'error': '見つかりません'})
         try:
             size = int(self.headers.get('Content-Length', '0'))
@@ -74,12 +91,20 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(size))
             if not isinstance(body, dict):
                 raise ValueError()
+            if progress:
+                completed = body['completed']
+                if not isinstance(completed, list) or any(not isinstance(x, str) or x not in IDS for x in completed):
+                    raise ValueError()
+                result = {'completed': list(dict.fromkeys(completed))}
+                with LOCK:
+                    (STATE / 'meta' / 'progress.json').write_text(json.dumps(result))
+                return self.reply(200, result)
             lab, action = parts[1:]
             code = (LESSONS / lab / 'index.php').read_text() if action == 'reset' else body['code']
             if not isinstance(code, str) or not code.strip():
                 raise ValueError()
         except (ValueError, KeyError, TimeoutError):
-            return self.reply(400, {'error': '空でないコードを指定してください'})
+            return self.reply(400, {'error': '入力内容を確認してください'})
         with LOCK:
             target = STATE / lab / 'index.php'
             temp = target.with_suffix('.tmp')
@@ -90,10 +115,11 @@ class Handler(BaseHTTPRequestHandler):
 
 class Attacker(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.headers.get('Host') not in {'localhost:8084', '127.0.0.1:8084'}:
+        if self.headers.get('Host') != ATTACKER_HOST:
             self.send_error(403)
             return
-        body = (ROOT / 'static' / 'attacker.html').read_bytes()
+        account = RUNTIME_ORIGIN + '/csrf/' if RUNTIME_ORIGIN else 'http://localhost:8083/'
+        body = (ROOT / 'static' / 'attacker.html').read_text().replace('http://localhost:8083/', html.escape(account, quote=True)).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
@@ -103,6 +129,8 @@ class Attacker(BaseHTTPRequestHandler):
 
 
 def main():
+    STATE.mkdir(parents=True, exist_ok=True)
+    (STATE / 'meta').mkdir(parents=True, exist_ok=True)
     for lab in IDS:
         target = STATE / lab / 'index.php'
         target.parent.mkdir(parents=True, exist_ok=True)
