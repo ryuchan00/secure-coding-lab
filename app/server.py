@@ -1,5 +1,6 @@
 """Local single-learner editor. PHP executes only in separate containers."""
 import json
+import mimetypes
 import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -49,6 +50,12 @@ class Handler(BaseHTTPRequestHandler):
         if path in static:
             name, kind = static[path]
             return self.reply(200, (ROOT / 'static' / name).read_bytes(), kind + '; charset=utf-8')
+        if path.startswith('/vendor/codemirror/'):
+            base = ROOT / 'static' / 'vendor' / 'codemirror'
+            target = (ROOT / 'static' / path.lstrip('/')).resolve()
+            if target.is_relative_to(base) and target.is_file():
+                kind = mimetypes.guess_type(target.name)[0] or 'application/octet-stream'
+                return self.reply(200, target.read_bytes(), kind + '; charset=utf-8')
         self.reply(404, {'error': '見つかりません'})
 
     def do_POST(self):

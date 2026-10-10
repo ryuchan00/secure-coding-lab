@@ -4,7 +4,18 @@ const $ = id => document.getElementById(id);
 let lessons = [], current, saved = '', solution = '', busy = false;
 let completed;
 try { completed = new Set(JSON.parse(localStorage.getItem('scl-completed') || '[]')); } catch { completed = new Set(); }
-const dirty = () => $('editor').value !== saved;
+const cm = CodeMirror.fromTextArea($('editor'), {
+  mode: 'application/x-httpd-php', theme: 'dracula', lineNumbers: true,
+  styleActiveLine: true, matchBrackets: true, indentUnit: 4, tabSize: 4,
+  indentWithTabs: false, autofocus: false,
+  extraKeys: {
+    Tab: 'indentMore', 'Shift-Tab': 'indentLess',
+    'Ctrl-Enter': () => action(run), 'Cmd-Enter': () => action(run),
+  },
+});
+cm.getInputField().setAttribute('aria-label', 'PHPコードエディタ');
+window.labEditor = cm;
+const dirty = () => cm.getValue() !== saved;
 function status(text, error = false) { $('status').textContent = text; $('status').classList.toggle('error', error); }
 async function api(path, data) {
   const response = await fetch('/api/' + path, data === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
@@ -13,7 +24,6 @@ async function api(path, data) {
   return result;
 }
 function lines() {
-  $('lines').textContent = $('editor').value.split('\n').map((_, i) => i + 1).join('\n');
   $('dirty').textContent = dirty() ? '未保存' : '保存済み';
 }
 function progress() {
@@ -22,7 +32,7 @@ function progress() {
 }
 function preview(attack = false) {
   const url = `http://localhost:${attack ? 8084 : current.port}/`;
-  $('preview').src = url;
+  $('preview').src = `${url}?_run=${Date.now()}`;
   $('external').href = url;
   $('app-tab').classList.toggle('selected', !attack);
   $('attack-tab').classList.toggle('selected', attack);
@@ -31,7 +41,7 @@ function preview(attack = false) {
 async function select(lesson) {
   if (dirty() && !confirm('未保存の変更を破棄して教材を切り替えますか？')) return;
   const result = await api(lesson.id + '/code');
-  current = lesson; saved = result.code; $('editor').value = saved; lines();
+  current = lesson; saved = result.code; cm.setValue(saved); cm.clearHistory(); lines();
   document.querySelectorAll('nav button').forEach(b => { const active = b.dataset.id === lesson.id; b.classList.toggle('active', active); b.setAttribute('aria-pressed', String(active)); });
   $('title').textContent = lesson.title; $('subtitle').textContent = lesson.subtitle; $('duration').textContent = lesson.duration;
   $('lesson-number').textContent = `LESSON ${String(lessons.indexOf(lesson) + 1).padStart(2, '0')}`;
@@ -51,25 +61,20 @@ async function action(fn) {
 }
 async function run() {
   if (!current) return;
-  const code = $('editor').value;
+  const code = cm.getValue();
   await api(current.id + '/code', { code }); saved = code; lines(); preview();
   status('保存しました。右の画面で通常操作と攻撃入力を試してください。');
 }
 $('run').onclick = () => action(run);
-$('editor').addEventListener('input', lines);
-$('editor').addEventListener('scroll', () => $('lines').scrollTop = $('editor').scrollTop);
-$('editor').addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); action(run); }
-  if (e.key === 'Tab') { e.preventDefault(); const t = $('editor'); t.setRangeText('    ', t.selectionStart, t.selectionEnd, 'end'); lines(); }
-});
+cm.on('change', lines);
 $('reset').onclick = () => action(async () => {
   if (!confirm('この教材のコードを初期状態に戻しますか？')) return;
   const result = await api(current.id + '/reset', {});
-  saved = result.code; $('editor').value = saved; lines(); preview(); status('初期コードに戻しました。CSRFの残高とセッションは維持されます。');
+  saved = result.code; cm.setValue(saved); cm.clearHistory(); lines(); preview(); status('初期コードに戻しました。CSRFの残高とセッションは維持されます。');
 });
 $('solution').onclick = () => action(async () => { solution = (await api(current.id + '/solution')).code; $('solution-code').textContent = solution; $('solution-dialog').showModal(); });
 $('close-dialog').onclick = () => $('solution-dialog').close();
-$('apply-solution').onclick = () => { $('editor').value = solution; lines(); $('solution-dialog').close(); status('修正例を反映しました。保存してRunで実行してください。'); };
+$('apply-solution').onclick = () => { cm.setValue(solution); lines(); $('solution-dialog').close(); status('修正例を反映しました。保存してRunで実行してください。'); };
 $('copy').onclick = async () => { try { await navigator.clipboard.writeText(current.payload); status('攻撃入力をコピーしました。右のフォームに貼り付けてください。'); } catch { status('コピーできませんでした。攻撃入力を選択してコピーしてください。', true); } };
 $('app-tab').onclick = () => preview(); $('attack-tab').onclick = () => preview(true);
 $('reload').onclick = () => preview($('attack-tab').classList.contains('selected'));

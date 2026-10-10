@@ -63,7 +63,7 @@ docker compose up -d
 
 ## 開発と検証
 
-Python標準ライブラリが編集APIと静的画面を配信し、PHP 8.4とSQLiteで演習を実行します。npm依存はブラウザテスト専用です。
+Python標準ライブラリが編集APIと静的画面を配信し、PHP 8.4とSQLiteで演習を実行します。コードエディタはCodeMirror 5を同梱し、PHP構文色分け、行番号、自動インデント、括弧対応表示を提供します。編集時に外部CDNへ接続しません。Node.jsとPlaywrightはブラウザテスト専用です。
 
 ```sh
 npm ci
@@ -84,3 +84,5 @@ PlaywrightはSQLiの認証回避、XSSのJavaScript実行、CSRFのCookie付き�
 ## CureVulnとの関係
 
 2017年度未踏事業の[CureVuln紹介資料](https://www.ipa.go.jp/archive/files/000065633.pdf)にある、教材・エディタ・アプリを並べる学習形式を参考にしています。[元の公開教材](https://github.com/curevuln/curevuln-exercise)は調査しましたが、リポジトリ全体のライセンスを確認できなかったため、ソース・教材・画像は転載していません。本プロジェクトの実装と教材はMITライセンスです。
+
+PHPのファイル更新保護を無効にしているため、保存したコードは次のリクエストですぐ反映されます。
