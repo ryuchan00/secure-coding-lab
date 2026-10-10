@@ -3,3 +3,5 @@
 @media(max-width:650px){.editor-wrap .CodeMirror{font-size:12px}}
 
 .beginner-guide{padding:16px 20px;margin:0 0 20px;background:#fff;border:1px solid var(--border);border-radius:10px;font-size:13px;line-height:1.9}.beginner-guide summary{cursor:pointer;font-weight:600}.reading-tabs{display:flex;gap:5px;margin:20px 0 4px}.reading-tabs button{font-size:12px;border:1px solid var(--border);border-radius:5px;padding:8px;background:white;color:#48655b}.reading-tabs .selected{background:#eaf3ed;border-color:var(--green)}.explanation-code{font:12px/1.7 monospace;white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:#edf3ee;border-radius:6px}nav{grid-template-columns:repeat(3,minmax(0,1fr))}.lesson p:not(.eyebrow){font-size:14px;line-height:1.9}.lesson h3{font-size:15px}.workspace{height:calc(100vh - 470px);min-height:690px}footer a{margin-left:8px}@media(max-width:650px){nav{grid-template-columns:1fr}.workspace{height:auto}}
+
+#payload-box h4{font-size:13px;margin:14px 0 8px}

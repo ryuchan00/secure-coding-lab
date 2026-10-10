@@ -52,9 +52,17 @@ async function select(lesson) {
     if (section.code) { const pre = document.createElement('pre'); pre.className = 'explanation-code'; pre.textContent = section.code; $('explanation').append(pre); }
   });
   reading(false);
+  const payloadBox = $('payload-box');
+  payloadBox.hidden = !lesson.payload; $('payload').textContent = lesson.payload || '';
+  payloadBox.remove();
   $('steps').replaceChildren();
-  lesson.steps.forEach((step, i) => { const h = document.createElement('h3'), n = document.createElement('span'), p = document.createElement('p'); n.className = 'step-number'; n.textContent = String(i + 1).padStart(2, '0'); h.append(n, step.title); p.textContent = step.body; $('steps').append(h, p); });
-  $('payload-box').hidden = !lesson.payload; $('payload').textContent = lesson.payload || '';
+  lesson.steps.forEach((step, i) => {
+    const h = document.createElement('h3'), n = document.createElement('span'), p = document.createElement('p');
+    n.className = 'step-number'; n.textContent = String(i + 1).padStart(2, '0');
+    h.append(n, step.title); p.textContent = step.body; $('steps').append(h, p);
+    if (step.attack && lesson.payload) $('steps').append(payloadBox);
+  });
+  if (!payloadBox.isConnected) $('steps').append(payloadBox);
   $('attack-tab').hidden = lesson.id !== 'csrf';
   preview(); progress(); status('コードを編集し、保存してRunで動作を確かめてください。');
 }
