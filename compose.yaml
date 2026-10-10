@@ -1,0 +1,97 @@
+name: secure-coding-lab
+services:
+  init:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    user: '0:0'
+    command: ['python', '-c', 'import os; [os.chown("/state/" + x, 1000, 1000) for x in ("sqli", "xss", "csrf")]']
+    volumes:
+      - sqli:/state/sqli
+      - xss:/state/xss
+      - csrf:/state/csrf
+    network_mode: none
+  editor:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    ports:
+      - '127.0.0.1:8080:8080'
+      - '127.0.0.1:8084:8084'
+    volumes:
+      - sqli:/state/sqli
+      - xss:/state/xss
+      - csrf:/state/csrf
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    pids_limit: 64
+    healthcheck:
+      test: ['CMD', 'python', '-c', 'import urllib.request; urllib.request.urlopen("http://localhost:8080/api/lessons")']
+      interval: 3s
+      timeout: 2s
+      retries: 10
+  sqli:
+    &runtime
+    build: ./runtime
+    volumes: ['sqli:/work:ro']
+    networks: [sqli]
+    depends_on:
+      editor:
+        condition: service_healthy
+    read_only: true
+    tmpfs: ['/tmp:uid=1000,gid=1000,mode=1777,size=32m']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 32
+  xss:
+    <<: *runtime
+    volumes: ['xss:/work:ro']
+    networks: [xss]
+  csrf:
+    <<: *runtime
+    volumes: ['csrf:/work:ro']
+    networks: [csrf]
+  gateway:
+    image: nginx:1.28-alpine
+    user: '1000:1000'
+    entrypoint: ['nginx', '-g', 'daemon off;']
+    ports:
+      - '127.0.0.1:8081:8081'
+      - '127.0.0.1:8082:8082'
+      - '127.0.0.1:8083:8083'
+    volumes:
+      - './runtime/nginx.conf:/etc/nginx/nginx.conf:ro'
+    networks: [edge, sqli, xss, csrf]
+    depends_on: [sqli, xss, csrf]
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8081/']
+      interval: 3s
+      timeout: 2s
+      retries: 10
+    read_only: true
+    tmpfs: ['/tmp:uid=1000,gid=1000,mode=1777,size=16m']
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 64m
+    pids_limit: 32
+volumes:
+  sqli:
+  xss:
+  csrf:
+networks:
+  edge:
+  sqli:
+    internal: true
+  xss:
+    internal: true
+  csrf:
+    internal: true

