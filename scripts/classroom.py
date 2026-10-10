@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import ipaddress
 import json
+import os
 from itertools import islice
 import re
 import secrets
@@ -51,8 +52,11 @@ seats, roster = [], []
 services, networks, volumes = {}, {'edge': {'ipam': {'config': [{'subnet': str(subnets[0])}]}}}, {}
 restrict = {'read_only': True, 'cap_drop': ['ALL'], 'security_opt': ['no-new-privileges:true'], 'pids_limit': 32}
 app_build = {'context': str(ROOT), 'dockerfile': 'app/Dockerfile'}
+# Bind-mounted private configuration belongs to the user who generated it.
+# Editors and PHP still run as UID 1000 with their own named volumes.
+config_user = f'{os.getuid()}:{os.getgid()}'
 services['portal'] = {
-    **restrict, 'image': 'secure-coding-lab-classroom-editor:latest', 'build': app_build, 'command': ['python', 'portal.py'],
+    **restrict, 'image': 'secure-coding-lab-classroom-editor:latest', 'build': app_build, 'user': config_user, 'command': ['python', 'portal.py'],
     'environment': {'EDITOR_ORIGIN': origin}, 'volumes': [f'{out}/seats.json:/config/seats.json:ro'],
     'networks': ['edge'], 'mem_limit': '128m', 'tmpfs': ['/tmp:uid=1000,gid=1000,mode=1777'],
 }
@@ -139,7 +143,7 @@ http {
 }}
 '''
 services['gateway'] = {
-    **restrict, 'image': 'nginx:1.28-alpine', 'user': '1000:1000', 'entrypoint': ['nginx', '-g', 'daemon off;'],
+    **restrict, 'image': 'nginx:1.28-alpine', 'user': config_user, 'entrypoint': ['nginx', '-g', 'daemon off;'],
     'ports': [f'{args.bind}:{p}:{p}' for p in ports],
     'volumes': [f'{out}/nginx.conf:/etc/nginx/nginx.conf:ro'],
     'networks': list(networks), 'depends_on': ['portal'] + [f'{s["name"]}-runtime' for s in seats],

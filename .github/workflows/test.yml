@@ -20,7 +20,11 @@ jobs:
       - run: docker compose -f .classroom-test/compose.json up --build -d --wait
       - run: CLASSROOM_CONFIG=.classroom-test npx playwright test tests/classroom.spec.js
       - if: failure()
-        run: docker compose logs
+        run: |
+          docker compose logs
+          if [ -f .classroom-test/compose.json ]; then
+            docker compose -f .classroom-test/compose.json logs
+          fi
       - if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -29,4 +33,7 @@ jobs:
       - if: always()
         run: docker compose down -v
       - if: always()
-        run: docker compose -f .classroom-test/compose.json down -v
+        run: |
+          if [ -f .classroom-test/compose.json ]; then
+            docker compose -f .classroom-test/compose.json down -v
+          fi
